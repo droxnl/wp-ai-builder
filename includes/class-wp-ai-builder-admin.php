@@ -362,41 +362,6 @@ class WP_AI_Builder_Admin {
 		);
 	}
 
-	public function handle_suggestions() {
-		check_ajax_referer( 'wp_ai_builder_nonce', 'nonce' );
-
-		$settings = $this->get_settings();
-		$api_key  = isset( $settings['api_key'] ) ? $settings['api_key'] : '';
-		$model    = isset( $settings['model'] ) ? $settings['model'] : 'gpt-4o-mini';
-
-		if ( empty( $api_key ) ) {
-			wp_send_json_error( array( 'message' => 'Vul eerst een OpenAI API key in bij Instellingen.' ) );
-		}
-
-		$data = $this->sanitize_brief( $_POST );
-
-		$prompt = sprintf(
-			"Je bent een ervaren UX/branding expert. Geef suggesties voor een WordPress website in het Nederlands. Branche: %s. Subbranche: %s. Website type: %s. Geef antwoord als geldig JSON met keys: siteType, pages, colors, notes. Geef colors als array met hexwaarden. Geef pages als komma-gescheiden string.",
-			$data['sector'],
-			$data['subsector'],
-			$data['site_type']
-		);
-
-		$result = WP_AI_Builder_OpenAI::request( $prompt, $api_key, $model );
-
-		if ( is_wp_error( $result ) ) {
-			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
-		}
-
-		$parsed = json_decode( trim( $result ), true );
-
-		if ( empty( $parsed ) || ! is_array( $parsed ) ) {
-			wp_send_json_error( array( 'message' => 'Kon de suggesties niet verwerken. Probeer opnieuw.' ) );
-		}
-
-		wp_send_json_success( $parsed );
-	}
-
 	public function handle_prompt_builder() {
 		check_ajax_referer( 'wp_ai_builder_nonce', 'nonce' );
 
