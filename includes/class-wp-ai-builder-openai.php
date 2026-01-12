@@ -7,7 +7,7 @@ class WP_AI_Builder_OpenAI {
 			'messages' => array(
 				array(
 					'role' => 'system',
-					'content' => 'You are a helpful assistant that outputs clean HTML and concise copy for WordPress pages.',
+					'content' => 'Je bent een behulpzame assistent die schone HTML en professionele, beknopte teksten in het Nederlands levert voor WordPress pagina’s.',
 				),
 				array(
 					'role' => 'user',
