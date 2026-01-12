@@ -37,11 +37,35 @@ class WP_AI_Builder_OpenAI {
 		$status = wp_remote_retrieve_response_code( $response );
 		$data = json_decode( wp_remote_retrieve_body( $response ), true );
 
-		if ( 200 !== $status || empty( $data['choices'][0]['message']['content'] ) ) {
-			return new WP_Error( 'openai_error', 'OpenAI API request failed.', array( 'status' => $status, 'body' => $data ) );
+		if ( null === $data ) {
+			return new WP_Error( 'openai_error', 'OpenAI API response was not valid JSON.', array( 'status' => $status ) );
 		}
 
-		return $data['choices'][0]['message']['content'];
+		$content = '';
+
+		if ( isset( $data['choices'][0]['message']['content'] ) ) {
+			$content = $data['choices'][0]['message']['content'];
+		} elseif ( isset( $data['choices'][0]['text'] ) ) {
+			$content = $data['choices'][0]['text'];
+		} elseif ( isset( $data['output'][0]['content'][0]['text'] ) ) {
+			$content = $data['output'][0]['content'][0]['text'];
+		}
+
+		if ( is_array( $content ) && isset( $content[0]['text'] ) ) {
+			$content = $content[0]['text'];
+		}
+
+		if ( 200 !== $status || '' === $content ) {
+			$error_message = 'OpenAI API request failed.';
+
+			if ( isset( $data['error']['message'] ) ) {
+				$error_message = $data['error']['message'];
+			}
+
+			return new WP_Error( 'openai_error', $error_message, array( 'status' => $status, 'body' => $data ) );
+		}
+
+		return $content;
 	}
 }
 }
