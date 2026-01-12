@@ -1,5 +1,6 @@
 <?php
 
+if ( ! class_exists( 'WP_AI_Builder_OpenAI' ) ) {
 class WP_AI_Builder_OpenAI {
 	public static function request( $prompt, $api_key, $model ) {
 		$body = array(
@@ -7,7 +8,7 @@ class WP_AI_Builder_OpenAI {
 			'messages' => array(
 				array(
 					'role' => 'system',
-					'content' => 'You are a helpful assistant that outputs clean HTML and concise copy for WordPress pages.',
+					'content' => 'Je bent een behulpzame assistent die professionele, beknopte teksten in het Nederlands levert voor WordPress pagina’s en op verzoek WPBakery shortcodes gebruikt.',
 				),
 				array(
 					'role' => 'user',
@@ -42,4 +43,5 @@ class WP_AI_Builder_OpenAI {
 
 		return $data['choices'][0]['message']['content'];
 	}
+}
 }
