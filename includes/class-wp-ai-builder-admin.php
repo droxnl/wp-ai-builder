@@ -11,6 +11,8 @@ class WP_AI_Builder_Admin {
 		add_action( 'wp_ajax_wp_ai_builder_build', array( $this, 'handle_build' ) );
 		add_action( 'wp_ajax_wp_ai_builder_suggest', array( $this, 'handle_suggestions' ) );
 		add_action( 'wp_ajax_wp_ai_builder_prompt', array( $this, 'handle_prompt_builder' ) );
+		add_action( 'wp_ajax_wp_ai_builder_logs', array( $this, 'handle_logs' ) );
+		add_action( 'wp_ajax_wp_ai_builder_cleanup', array( $this, 'handle_cleanup' ) );
 	}
 
 	public function register_menu() {
@@ -147,9 +149,13 @@ class WP_AI_Builder_Admin {
 			wp_send_json_error( array( 'message' => 'Vul eerst een OpenAI API key in bij Instellingen.' ) );
 		}
 
+		$this->log_event( 'Preview wordt voorbereid.' );
 		$data = $this->sanitize_brief( $_POST );
 		$data = $this->attach_logo_data( $data, false );
 		$data['pexels_images'] = $this->get_pexels_images( $data, $settings );
+		if ( ! empty( $data['pexels_images'] ) ) {
+			$this->log_event( 'Pexels beelden toegevoegd aan de preview.' );
+		}
 
 		$prompt = $this->build_preview_prompt( $data );
 		$result = WP_AI_Builder_OpenAI::request( $prompt, $api_key, $model );
@@ -160,8 +166,9 @@ class WP_AI_Builder_Admin {
 
 		$preview = wp_kses_post( $result );
 		update_option( 'wp_ai_builder_preview', $preview );
+		$this->log_event( 'Preview succesvol gegenereerd.' );
 
-		wp_send_json_success( array( 'html' => $preview ) );
+		wp_send_json_success( array( 'html' => $preview, 'logs' => $this->get_logs() ) );
 	}
 
 	public function handle_build() {
@@ -175,9 +182,15 @@ class WP_AI_Builder_Admin {
 			wp_send_json_error( array( 'message' => 'Vul eerst een OpenAI API key in bij Instellingen.' ) );
 		}
 
+		$this->log_event( 'Start met bouwen van de website.' );
 		$data   = $this->sanitize_brief( $_POST );
 		$data   = $this->attach_logo_data( $data, true );
 		$data['pexels_images'] = $this->get_pexels_images( $data, $settings );
+		$data['pexels_attachments'] = $this->sideload_pexels_images( $data['pexels_images'] );
+		$data['pexels_attachment_map'] = $this->map_attachment_urls( $data['pexels_attachments'] );
+		if ( ! empty( $data['pexels_attachments'] ) ) {
+			$this->log_event( 'Pexels afbeeldingen opgeslagen in de mediabibliotheek.' );
+		}
 		$pages  = array_filter( array_map( 'trim', explode( ',', $data['pages'] ) ) );
 		if ( empty( $pages ) ) {
 			$pages = array( 'Home', 'Over ons', 'Diensten', 'Contact' );
@@ -185,9 +198,10 @@ class WP_AI_Builder_Admin {
 		$prompt = $this->build_page_prompt( $data );
 
 		$created_pages = array();
+		$created_page_ids = array();
 
 		foreach ( $pages as $page_title ) {
-			$page_prompt = $prompt . "\n\nGenereer content voor de pagina met de titel '{$page_title}' in HTML.";
+			$page_prompt = $prompt . "\n\nGenereer content voor de pagina met de titel '{$page_title}' als WPBakery shortcodes.";
 			$content     = WP_AI_Builder_OpenAI::request( $page_prompt, $api_key, $model );
 
 			if ( is_wp_error( $content ) ) {
@@ -205,15 +219,144 @@ class WP_AI_Builder_Admin {
 
 			if ( $page_id && ! is_wp_error( $page_id ) ) {
 				$created_pages[] = $page_title;
+				$created_page_ids[] = $page_id;
+				$this->log_event( sprintf( 'Pagina "%s" aangemaakt.', $page_title ) );
 			}
 		}
 
 		$this->create_theme( $data );
+		$this->log_event( 'Nieuw thema aangemaakt en geactiveerd.' );
+		$this->store_generated_assets( $created_page_ids, $data );
 
 		wp_send_json_success(
 			array(
 				'message' => 'Website succesvol aangemaakt.',
 				'pages' => $created_pages,
+				'logs' => $this->get_logs(),
+			)
+		);
+	}
+
+	public function handle_suggestions() {
+		check_ajax_referer( 'wp_ai_builder_nonce', 'nonce' );
+
+		$settings = $this->get_settings();
+		$api_key  = isset( $settings['api_key'] ) ? $settings['api_key'] : '';
+		$model    = isset( $settings['model'] ) ? $settings['model'] : 'gpt-4o-mini';
+
+		if ( empty( $api_key ) ) {
+			wp_send_json_error( array( 'message' => 'Vul eerst een OpenAI API key in bij Instellingen.' ) );
+		}
+
+		$data = $this->sanitize_brief( $_POST );
+
+		$prompt = sprintf(
+			"Je bent een ervaren UX/branding expert. Geef suggesties voor een WordPress website in het Nederlands. Branche: %s. Subbranche: %s. Website type: %s. Geef antwoord als geldig JSON met keys: siteType, pages, colors, notes. Geef colors als array met hexwaarden. Geef pages als komma-gescheiden string.",
+			$data['sector'],
+			$data['subsector'],
+			$data['site_type']
+		);
+
+		$this->log_event( 'AI suggesties worden opgehaald.' );
+		$result = WP_AI_Builder_OpenAI::request( $prompt, $api_key, $model );
+
+		if ( is_wp_error( $result ) ) {
+			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+		}
+
+		$parsed = json_decode( trim( $result ), true );
+
+		if ( empty( $parsed ) || ! is_array( $parsed ) ) {
+			wp_send_json_error( array( 'message' => 'Kon de suggesties niet verwerken. Probeer opnieuw.' ) );
+		}
+
+		$this->log_event( 'AI suggesties succesvol toegevoegd.' );
+		$parsed['logs'] = $this->get_logs();
+
+		wp_send_json_success( $parsed );
+	}
+
+	public function handle_prompt_builder() {
+		check_ajax_referer( 'wp_ai_builder_nonce', 'nonce' );
+
+		$settings = $this->get_settings();
+		$api_key  = isset( $settings['api_key'] ) ? $settings['api_key'] : '';
+		$model    = isset( $settings['model'] ) ? $settings['model'] : 'gpt-4o-mini';
+
+		if ( empty( $api_key ) ) {
+			wp_send_json_error( array( 'message' => 'Vul eerst een OpenAI API key in bij Instellingen.' ) );
+		}
+
+		$data = $this->sanitize_brief( $_POST );
+
+		$prompt = sprintf(
+			"Schrijf een uitgebreide briefing in het Nederlands voor een WordPress website. Branche: %s. Subbranche: %s. Website type: %s. Pagina's: %s. Kernnotities: %s. Output alleen de briefingstekst zonder markdown.",
+			$data['sector'],
+			$data['subsector'],
+			$data['site_type'],
+			$data['pages'],
+			$data['notes']
+		);
+
+		$this->log_event( 'AI prompt wordt gegenereerd.' );
+		$result = WP_AI_Builder_OpenAI::request( $prompt, $api_key, $model );
+
+		if ( is_wp_error( $result ) ) {
+			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+		}
+
+		$this->log_event( 'AI prompt succesvol gegenereerd.' );
+		wp_send_json_success(
+			array(
+				'prompt' => sanitize_textarea_field( $result ),
+				'logs' => $this->get_logs(),
+			)
+		);
+	}
+
+	public function handle_logs() {
+		check_ajax_referer( 'wp_ai_builder_nonce', 'nonce' );
+
+		wp_send_json_success( array( 'logs' => $this->get_logs() ) );
+	}
+
+	public function handle_cleanup() {
+		check_ajax_referer( 'wp_ai_builder_nonce', 'nonce' );
+
+		$generated = $this->get_generated_assets();
+		$deleted_pages = 0;
+		$deleted_media = 0;
+
+		if ( ! empty( $generated['pages'] ) ) {
+			foreach ( $generated['pages'] as $page_id ) {
+				if ( wp_delete_post( (int) $page_id, true ) ) {
+					$deleted_pages++;
+				}
+			}
+		}
+
+		if ( ! empty( $generated['media'] ) ) {
+			foreach ( $generated['media'] as $attachment_id ) {
+				if ( wp_delete_attachment( (int) $attachment_id, true ) ) {
+					$deleted_media++;
+				}
+			}
+		}
+
+		if ( ! empty( $generated['theme'] ) ) {
+			$theme_dir = trailingslashit( WP_CONTENT_DIR ) . 'themes/' . $generated['theme'];
+			if ( is_dir( $theme_dir ) ) {
+				$this->delete_directory( $theme_dir );
+			}
+		}
+
+		delete_option( 'wp_ai_builder_generated' );
+		$this->log_event( 'Alle gegenereerde content is verwijderd.' );
+
+		wp_send_json_success(
+			array(
+				'message' => sprintf( 'Verwijderd: %d pagina(s) en %d media-bestand(en).', $deleted_pages, $deleted_media ),
+				'logs' => $this->get_logs(),
 			)
 		);
 	}
@@ -317,10 +460,11 @@ class WP_AI_Builder_Admin {
 
 	private function build_page_prompt( $data ) {
 		$image_block = $this->format_images_for_prompt( $data );
+		$attachment_block = $this->format_attachments_for_prompt( $data );
 		$extended_prompt = $this->get_extended_prompt( $data );
 
 		return sprintf(
-			"Je bouwt een volledige WordPress site in het Nederlands. Branche: %s. Subbranche: %s. Website type: %s. Merk kleuren: %s. Logo URL: %s. Extra instructies: %s. %s %s Gebruik conversiongerichte copy, duidelijke CTA's en lever schone HTML die compatibel is met WPBakery (geen Gutenberg blocks).",
+			"Je bouwt een volledige WordPress site in het Nederlands. Branche: %s. Subbranche: %s. Website type: %s. Merk kleuren: %s. Logo URL: %s. Extra instructies: %s. %s %s %s Geef de content terug als WPBakery shortcodes (vc_row, vc_column, vc_column_text, vc_single_image, vc_btn). Gebruik geen Gutenberg blocks en geen los HTML. Gebruik voor afbeeldingen de attachment ID's in vc_single_image.",
 			$data['sector'],
 			$data['subsector'],
 			$data['site_type'],
@@ -328,6 +472,7 @@ class WP_AI_Builder_Admin {
 			$data['logo'],
 			$data['notes'],
 			$image_block,
+			$attachment_block,
 			$extended_prompt
 		);
 	}
@@ -371,6 +516,91 @@ class WP_AI_Builder_Admin {
 		if ( ! empty( $data['logo_id'] ) ) {
 			set_theme_mod( 'custom_logo', (int) $data['logo_id'] );
 		}
+	}
+
+	private function sideload_pexels_images( $images ) {
+		if ( empty( $images ) ) {
+			return array();
+		}
+
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		require_once ABSPATH . 'wp-admin/includes/media.php';
+		require_once ABSPATH . 'wp-admin/includes/image.php';
+
+		$attachment_ids = array();
+		foreach ( $images as $image_url ) {
+			$attachment_id = media_sideload_image( $image_url, 0, null, 'id' );
+			if ( ! is_wp_error( $attachment_id ) ) {
+				$attachment_ids[] = (int) $attachment_id;
+			}
+		}
+
+		return $attachment_ids;
+	}
+
+	private function store_generated_assets( $page_ids, $data ) {
+		$existing = $this->get_generated_assets();
+		$media = array_merge( $existing['media'], $data['pexels_attachments'] );
+		if ( ! empty( $data['logo_id'] ) ) {
+			$media[] = (int) $data['logo_id'];
+		}
+
+		update_option(
+			'wp_ai_builder_generated',
+			array(
+				'pages' => array_unique( array_merge( $existing['pages'], $page_ids ) ),
+				'media' => array_unique( $media ),
+				'theme' => 'ai-builder-theme',
+			)
+		);
+	}
+
+	private function get_generated_assets() {
+		$generated = get_option( 'wp_ai_builder_generated', array() );
+
+		return array(
+			'pages' => isset( $generated['pages'] ) ? (array) $generated['pages'] : array(),
+			'media' => isset( $generated['media'] ) ? (array) $generated['media'] : array(),
+			'theme' => isset( $generated['theme'] ) ? $generated['theme'] : '',
+		);
+	}
+
+	private function log_event( $message ) {
+		$logs = get_option( 'wp_ai_builder_log', array() );
+		$logs[] = array(
+			'time' => current_time( 'mysql' ),
+			'message' => sanitize_text_field( $message ),
+		);
+		update_option( 'wp_ai_builder_log', $logs );
+	}
+
+	private function get_logs() {
+		return get_option( 'wp_ai_builder_log', array() );
+	}
+
+	private function delete_directory( $dir ) {
+		if ( ! is_dir( $dir ) ) {
+			return;
+		}
+
+		$items = scandir( $dir );
+		if ( ! $items ) {
+			return;
+		}
+
+		foreach ( $items as $item ) {
+			if ( '.' === $item || '..' === $item ) {
+				continue;
+			}
+			$path = $dir . '/' . $item;
+			if ( is_dir( $path ) ) {
+				$this->delete_directory( $path );
+			} else {
+				unlink( $path );
+			}
+		}
+
+		rmdir( $dir );
 	}
 
 	private function attach_logo_data( $data, $allow_sideload ) {
@@ -479,6 +709,31 @@ class WP_AI_Builder_Admin {
 		);
 
 		return "Gebruik uitsluitend deze Pexels afbeeldingen:\n" . implode( "\n", $lines );
+	}
+
+	private function format_attachments_for_prompt( $data ) {
+		if ( empty( $data['pexels_attachment_map'] ) ) {
+			return 'Geen lokale attachments beschikbaar voor afbeeldingen.';
+		}
+
+		$lines = array();
+		foreach ( $data['pexels_attachment_map'] as $attachment_id => $url ) {
+			$lines[] = sprintf( '- ID %d: %s', $attachment_id, $url );
+		}
+
+		return "Gebruik deze mediabibliotheek attachments voor afbeeldingen:\n" . implode( "\n", $lines );
+	}
+
+	private function map_attachment_urls( $attachment_ids ) {
+		$map = array();
+		foreach ( $attachment_ids as $attachment_id ) {
+			$url = wp_get_attachment_url( $attachment_id );
+			if ( $url ) {
+				$map[ (int) $attachment_id ] = esc_url_raw( $url );
+			}
+		}
+
+		return $map;
 	}
 
 	private function get_extended_prompt( $data ) {

@@ -73,6 +73,9 @@ createApp({
       status: '',
       statusType: 'info',
       sectors: sectorOptions,
+      logs: [],
+      isLogBusy: false,
+      isCleaning: false,
       brief: {
         sector: '',
         subsector: '',
@@ -120,6 +123,9 @@ createApp({
     hasPexelsKey() {
       return wpAiBuilderSettings.hasPexelsKey;
     },
+  },
+  mounted() {
+    this.fetchLogs();
   },
   methods: {
     setStatus(message, type = 'info') {
@@ -184,6 +190,7 @@ createApp({
 
         if (action === 'wp_ai_builder_preview') {
           this.previewHtml = result.data.html;
+          this.logs = result.data.logs || this.logs;
           this.step = 4;
           this.setStatus('Preview klaar. Controleer en keur goed om de website te bouwen.', 'success');
           return;
@@ -191,6 +198,7 @@ createApp({
 
         const pages = result.data.pages?.join(', ') || 'Pagina’s aangemaakt.';
         this.setStatus(`Website succesvol gebouwd. ${pages}`, 'success');
+        this.logs = result.data.logs || this.logs;
         this.step = 4;
       } catch (error) {
         this.setStatus('Netwerkfout. Probeer opnieuw.', 'error');
@@ -237,6 +245,7 @@ createApp({
           this.brief.colors = result.data.colors.length ? result.data.colors : this.brief.colors;
         }
 
+        this.logs = result.data.logs || this.logs;
         this.setStatus('Suggesties toegevoegd. Pas ze gerust aan.', 'success');
       } catch (error) {
         this.setStatus('Netwerkfout. Probeer opnieuw.', 'error');
@@ -263,11 +272,59 @@ createApp({
 
         this.brief.customPrompt = result.data.prompt || '';
         this.brief.promptMode = 'custom';
+        this.logs = result.data.logs || this.logs;
         this.setStatus('Prompt toegevoegd. Je kunt hem nog aanpassen.', 'success');
       } catch (error) {
         this.setStatus('Netwerkfout. Probeer opnieuw.', 'error');
       } finally {
         this.isPromptBusy = false;
+      }
+    },
+    async fetchLogs() {
+      this.isLogBusy = true;
+      const payload = new FormData();
+      payload.append('action', 'wp_ai_builder_logs');
+      payload.append('nonce', wpAiBuilderSettings.nonce);
+
+      try {
+        const response = await fetch(wpAiBuilderSettings.ajaxUrl, {
+          method: 'POST',
+          body: payload,
+        });
+        const result = await response.json();
+        if (result.success) {
+          this.logs = result.data.logs || [];
+        }
+      } catch (error) {
+        this.setStatus('Kon logboek niet ophalen.', 'error');
+      } finally {
+        this.isLogBusy = false;
+      }
+    },
+    async cleanupGenerated() {
+      this.isCleaning = true;
+      this.setStatus('Opschonen van gegenereerde content...', 'info');
+
+      const payload = new FormData();
+      payload.append('action', 'wp_ai_builder_cleanup');
+      payload.append('nonce', wpAiBuilderSettings.nonce);
+
+      try {
+        const response = await fetch(wpAiBuilderSettings.ajaxUrl, {
+          method: 'POST',
+          body: payload,
+        });
+        const result = await response.json();
+        if (!result.success) {
+          this.setStatus(result.data?.message || 'Opschonen mislukt.', 'error');
+          return;
+        }
+        this.logs = result.data.logs || this.logs;
+        this.setStatus(result.data?.message || 'Opschonen afgerond.', 'success');
+      } catch (error) {
+        this.setStatus('Netwerkfout. Probeer opnieuw.', 'error');
+      } finally {
+        this.isCleaning = false;
       }
     },
   },
@@ -424,7 +481,34 @@ createApp({
 
       <section class="ai-builder__card" v-if="status">
         <div class="ai-builder__section">
-          <div :class="['ai-builder__status', statusType]">{{ status }}</div>
+          <div :class="['ai-builder__status', statusType]">
+            <span v-if="isBusy || isSuggesting || isPromptBusy || isCleaning" class="ai-builder__loader"></span>
+            {{ status }}
+          </div>
+        </div>
+      </section>
+
+      <section class="ai-builder__card">
+        <div class="ai-builder__section">
+          <div class="ai-builder__log-header">
+            <div>
+              <h2>Logboek</h2>
+              <p class="muted">Bekijk alle stappen die de wizard uitvoert tijdens het bouwen.</p>
+            </div>
+            <div class="ai-builder__actions">
+              <button class="btn btn--ghost" :disabled="isLogBusy" @click.prevent="fetchLogs">Logboek verversen</button>
+              <button class="btn btn--ghost" :disabled="isCleaning" @click.prevent="cleanupGenerated">Verwijder alle gegenereerde content</button>
+            </div>
+          </div>
+          <div class="ai-builder__log">
+            <div v-if="!logs.length" class="muted">Nog geen logregels.</div>
+            <ul v-else>
+              <li v-for="(log, index) in logs" :key="index">
+                <span class="log-time">{{ log.time }}</span>
+                <span class="log-message">{{ log.message }}</span>
+              </li>
+            </ul>
+          </div>
         </div>
       </section>
     </div>

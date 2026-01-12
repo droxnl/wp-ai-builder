@@ -7,7 +7,7 @@ class WP_AI_Builder_OpenAI {
 			'messages' => array(
 				array(
 					'role' => 'system',
-					'content' => 'Je bent een behulpzame assistent die schone HTML en professionele, beknopte teksten in het Nederlands levert voor WordPress pagina’s.',
+					'content' => 'Je bent een behulpzame assistent die professionele, beknopte teksten in het Nederlands levert voor WordPress pagina’s en op verzoek WPBakery shortcodes gebruikt.',
 				),
 				array(
 					'role' => 'user',
