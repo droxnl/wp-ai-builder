@@ -44,7 +44,7 @@ class WP_AI_Builder_Admin {
 
 		wp_enqueue_style(
 			'wp-ai-builder-admin',
-			plugin_dir_url( dirname( __DIR__ ) ) . 'assets/admin.css',
+			WP_AI_BUILDER_URL . 'assets/admin.css',
 			array(),
 			'0.2.0'
 		);
@@ -59,7 +59,7 @@ class WP_AI_Builder_Admin {
 
 		wp_enqueue_script(
 			'wp-ai-builder-admin-app',
-			plugin_dir_url( dirname( __DIR__ ) ) . 'assets/admin-app.js',
+			WP_AI_BUILDER_URL . 'assets/admin-app.js',
 			array( 'wp-ai-builder-vue' ),
 			'0.2.0',
 			true
