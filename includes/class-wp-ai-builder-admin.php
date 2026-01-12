@@ -38,83 +38,53 @@ class WP_AI_Builder_Admin {
 			return;
 		}
 
-		wp_enqueue_script(
+		ob_start();
+		settings_fields( 'wp_ai_builder' );
+		$settings_fields = ob_get_clean();
+
+		wp_enqueue_style(
 			'wp-ai-builder-admin',
-			plugin_dir_url( dirname( __DIR__ ) ) . 'assets/admin.js',
-			array( 'jquery' ),
-			'0.1.0',
+			plugin_dir_url( dirname( __DIR__ ) ) . 'assets/admin.css',
+			array(),
+			'0.2.0'
+		);
+
+		wp_enqueue_script(
+			'wp-ai-builder-vue',
+			'https://unpkg.com/vue@3/dist/vue.global.prod.js',
+			array(),
+			'3.4.38',
+			true
+		);
+
+		wp_enqueue_script(
+			'wp-ai-builder-admin-app',
+			plugin_dir_url( dirname( __DIR__ ) ) . 'assets/admin-app.js',
+			array( 'wp-ai-builder-vue' ),
+			'0.2.0',
 			true
 		);
 
 		wp_localize_script(
-			'wp-ai-builder-admin',
-			'wpAiBuilder',
+			'wp-ai-builder-admin-app',
+			'wpAiBuilderSettings',
 			array(
 				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 				'nonce' => wp_create_nonce( 'wp_ai_builder_nonce' ),
+				'preview' => get_option( 'wp_ai_builder_preview', '' ),
+				'settingsFields' => $settings_fields,
 			)
 		);
 	}
 
 	public function render_page() {
 		$settings = get_option( $this->option_key, array( 'api_key' => '', 'model' => 'gpt-4o-mini' ) );
-		$preview  = get_option( 'wp_ai_builder_preview', '' );
 		?>
-		<div class="wrap">
-			<h1>AI Website Builder</h1>
-			<form method="post" action="options.php">
-				<?php settings_fields( 'wp_ai_builder' ); ?>
-				<table class="form-table">
-					<tr>
-						<th scope="row"><label for="wp_ai_builder_api_key">OpenAI API Key</label></th>
-						<td><input type="password" id="wp_ai_builder_api_key" name="<?php echo esc_attr( $this->option_key ); ?>[api_key]" value="<?php echo esc_attr( $settings['api_key'] ); ?>" class="regular-text"></td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="wp_ai_builder_model">OpenAI Model</label></th>
-						<td><input type="text" id="wp_ai_builder_model" name="<?php echo esc_attr( $this->option_key ); ?>[model]" value="<?php echo esc_attr( $settings['model'] ); ?>" class="regular-text" placeholder="gpt-4o-mini"></td>
-					</tr>
-				</table>
-				<?php submit_button( 'Save Settings' ); ?>
-			</form>
-
-			<hr>
-
-			<h2>Website Brief</h2>
-			<table class="form-table">
-				<tr>
-					<th scope="row"><label for="wp_ai_builder_sector">Sector / Industry</label></th>
-					<td><input type="text" id="wp_ai_builder_sector" class="regular-text"></td>
-				</tr>
-				<tr>
-					<th scope="row"><label for="wp_ai_builder_logo">Logo URL</label></th>
-					<td><input type="url" id="wp_ai_builder_logo" class="regular-text"></td>
-				</tr>
-				<tr>
-					<th scope="row"><label for="wp_ai_builder_colors">Brand Colors</label></th>
-					<td><input type="text" id="wp_ai_builder_colors" class="regular-text" placeholder="#0f172a, #38bdf8"></td>
-				</tr>
-				<tr>
-					<th scope="row"><label for="wp_ai_builder_site_type">Website Type</label></th>
-					<td><input type="text" id="wp_ai_builder_site_type" class="regular-text" placeholder="Marketing, SaaS, Portfolio"></td>
-				</tr>
-				<tr>
-					<th scope="row"><label for="wp_ai_builder_pages">Desired Pages</label></th>
-					<td><input type="text" id="wp_ai_builder_pages" class="regular-text" placeholder="Home, About, Services, Contact"></td>
-				</tr>
-				<tr>
-					<th scope="row"><label for="wp_ai_builder_notes">Extra Instructions</label></th>
-					<td><textarea id="wp_ai_builder_notes" rows="5" class="large-text"></textarea></td>
-				</tr>
-			</table>
-			<p>
-				<button class="button button-primary" id="wp-ai-builder-preview">Generate Preview</button>
-				<button class="button" id="wp-ai-builder-build">Approve &amp; Build Site</button>
-			</p>
-			<div id="wp-ai-builder-status" style="margin-top: 12px;"></div>
-			<h2>Preview</h2>
-			<div id="wp-ai-builder-preview" style="border:1px solid #ccd0d4; padding: 16px; background:#fff;">
-				<?php echo wp_kses_post( $preview ); ?>
-			</div>
+		<div class="wrap wp-ai-builder-wrap">
+			<div id="wp-ai-builder-app" data-api-key="<?php echo esc_attr( $settings['api_key'] ); ?>" data-model="<?php echo esc_attr( $settings['model'] ); ?>"></div>
+			<noscript>
+				<div class="notice notice-error"><p>JavaScript is required to use the AI Website Builder.</p></div>
+			</noscript>
 		</div>
 		<?php
 	}
@@ -158,6 +128,9 @@ class WP_AI_Builder_Admin {
 
 		$data   = $this->sanitize_brief( $_POST );
 		$pages  = array_filter( array_map( 'trim', explode( ',', $data['pages'] ) ) );
+		if ( empty( $pages ) ) {
+			$pages = array( 'Home', 'About', 'Services', 'Contact' );
+		}
 		$prompt = $this->build_page_prompt( $data );
 
 		$created_pages = array();
