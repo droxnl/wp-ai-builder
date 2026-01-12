@@ -1,5 +1,6 @@
 <?php
 
+if ( ! class_exists( 'WP_AI_Builder_Admin' ) ) {
 class WP_AI_Builder_Admin {
 	private $option_key = 'wp_ai_builder_settings';
 
@@ -754,4 +755,5 @@ class WP_AI_Builder_Admin {
 			)
 		);
 	}
+}
 }

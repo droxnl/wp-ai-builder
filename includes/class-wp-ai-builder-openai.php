@@ -1,5 +1,6 @@
 <?php
 
+if ( ! class_exists( 'WP_AI_Builder_OpenAI' ) ) {
 class WP_AI_Builder_OpenAI {
 	public static function request( $prompt, $api_key, $model ) {
 		$body = array(
@@ -42,4 +43,5 @@ class WP_AI_Builder_OpenAI {
 
 		return $data['choices'][0]['message']['content'];
 	}
+}
 }
